@@ -52,12 +52,18 @@ def get_news(country, topic, api_key):
         st.warning("Please enter your NewsAPI key in the sidebar.")
         return pd.DataFrame()
 
-    if topic.strip():
-        url = f"https://newsapi.org/v2/everything?q={topic}&language=en&sortBy=publishedAt&apiKey={api_key}"
-    else:
-        url = f"https://newsapi.org/v2/top-headlines?country={country}&apiKey={api_key}"
+    # ✅ 'everything' 제거 — 국가 필터가 반드시 적용되도록
+    base_url = "https://newsapi.org/v2/top-headlines"
+    params = {
+        "country": country,
+        "apiKey": api_key
+    }
 
-    response = requests.get(url)
+    # ✅ 키워드가 입력되면 함께 필터링
+    if topic.strip():
+        params["q"] = topic
+
+    response = requests.get(base_url, params=params)
     data = response.json()
 
     if response.status_code != 200:
@@ -70,13 +76,14 @@ def get_news(country, topic, api_key):
             {
                 "Title": a["title"],
                 "Source": a["source"]["name"],
-                "Published": a["publishedAt"][:10],
+                "Published": a["publishedAt"][:10] if a.get("publishedAt") else "",
                 "URL": a["url"]
             }
             for a in articles if a.get("title")
         ])
     else:
         return pd.DataFrame()
+
 
 # ----------------------------------------------------------
 # 📈 Display Results
