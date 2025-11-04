@@ -41,29 +41,57 @@ topic = st.text_input("Enter a topic or leave blank to see top headlines:", "")
 # ----------------------------------------------------------
 # 📰 Fetch News Articles
 # ----------------------------------------------------------
+import re
+
+def clean_text(text):
+    """Remove HTML, JS snippets, and unwanted artifacts from article summaries."""
+    if not text:
+        return ""
+
+    # 1️⃣ Remove all HTML tags
+    text = re.sub(r"<[^>]+>", "", text)
+
+    # 2️⃣ Remove any JavaScript event code or functions
+    text = re.sub(r"window\.open\(.*?\)", "", text)
+    text = re.sub(r"\{.*?window\.open.*?\}", "", text)
+    text = re.sub(r"onclick=.*?(;|\"|')", "", text)
+    text = re.sub(r"javascript:.*?(;|\"|')", "", text)
+    text = re.sub(r"return\s+false;?", "", text)
+
+    # 3️⃣ Remove remaining JS-like syntax artifacts (, 200); etc.)
+    text = re.sub(r"[,;:]*\s*\d+\s*[\);]*", "", text)
+
+    # 4️⃣ Remove redundant symbols and braces
+    text = re.sub(r"[\{\}\(\)\[\]\<\>\"']", "", text)
+
+    # 5️⃣ Remove '[+123 chars]' style truncation indicators
+    text = re.sub(r"\[\+\d+\s*chars\]", "", text)
+
+    # 6️⃣ Normalize whitespace
+    text = re.sub(r"\s+", " ", text).strip()
+
+    return text
+
 def get_news(country, topic, api_key):
     """Fetch latest news articles from NewsAPI."""
     if not api_key:
         st.warning("Please enter your NewsAPI key in the sidebar.")
         return pd.DataFrame()
 
-    # ✅ Global mode → everything 엔드포인트 사용
     if country == "global":
         base_url = "https://newsapi.org/v2/everything"
         params = {
             "q": topic if topic.strip() else "trending",
             "language": "en",
             "sortBy": "publishedAt",
-            "pageSize": 15,
+            "pageSize": 10,
             "apiKey": api_key
         }
-
-    # ✅ 특정 국가 선택 → top-headlines 사용
     else:
         base_url = "https://newsapi.org/v2/top-headlines"
         params = {
             "country": country,
-            "pageSize": 15,
+            "pageSize": 10,
             "apiKey": api_key
         }
         if topic.strip():
@@ -81,6 +109,7 @@ def get_news(country, topic, api_key):
         return pd.DataFrame([
             {
                 "Title": a["title"],
+                "Summary": clean_text(a.get("description") or a.get("content") or ""),
                 "Source": a["source"]["name"],
                 "Published": a["publishedAt"][:10] if a.get("publishedAt") else "",
                 "URL": a["url"]
@@ -91,24 +120,28 @@ def get_news(country, topic, api_key):
         return pd.DataFrame()
 
 # ----------------------------------------------------------
-# 📈 Display Results
+# 📈 Display Results (with summaries)
 # ----------------------------------------------------------
 if st.button("Search 🔍"):
     news_df = get_news(country, topic, user_api_key)
     if not news_df.empty:
         st.subheader(f"🗞️ Top News from {country_options[country]}")
 
-        # ✅ URL을 클릭 가능한 링크로 변환
-        news_df["Title"] = news_df.apply(
-            lambda x: f'<a href="{x["URL"]}" target="_blank">{x["Title"]}</a>', axis=1
-        )
+        # ✅ HTML 구성
+        html_content = ""
+        for _, row in news_df.iterrows():
+            summary = row["Summary"][:200] + "..." if len(row["Summary"]) > 200 else row["Summary"]
+            html_content += f"""
+            <div style="margin-bottom: 1.2em; padding: 0.8em; border-radius: 10px; background-color: #f9f9f9;">
+                <a href="{row['URL']}" target="_blank" style="font-size: 1.05em; font-weight: 600; color: #1a73e8; text-decoration: none;">
+                    {row['Title']}
+                </a><br>
+                <span style="font-size: 0.9em; color: #555;">{summary}</span><br>
+                <span style="font-size: 0.8em; color: #888;">📅 {row['Published']} | 🏷️ {row['Source']}</span>
+            </div>
+            """
 
-        # ✅ 불필요한 URL 컬럼 제거
-        news_df_display = news_df[["Title", "Source", "Published"]]
-
-        # ✅ HTML로 출력 (링크 활성화)
-        st.write(news_df_display.to_html(escape=False, index=False), unsafe_allow_html=True)
-
+        st.markdown(html_content, unsafe_allow_html=True)
     else:
         st.warning("No news found or invalid API key.")
 
