@@ -1,130 +1,129 @@
 import streamlit as st
 import requests
 import re
+import time
+import traceback
 from openai import OpenAI
 
-# ---- App Title ----
-st.set_page_config(page_title="Global Trend News Dashboard", page_icon="📰", layout="wide")
-st.title("📰 Global Trend News Dashboard")
+# =============================
+# ⚙️ 기본 설정
+# =============================
+st.set_page_config(page_title="AI 뉴스 요약", layout="wide")
 
-# ---- Sidebar: Settings ----
-st.sidebar.header("🔑 NewsAPI Settings")
-st.sidebar.markdown("""
-### 👉 How to get a NewsAPI Key
-1. Visit [**NewsAPI.org**](https://newsapi.org)
-2. Sign up for a free account
-3. Go to the **Dashboard**
-4. Copy your **API key** and paste it below 👇
-""")
+st.title("📰 글로벌 트렌드 뉴스 요약 (GPT 요약 기능 포함)")
 
-news_api_key = st.sidebar.text_input("Enter your NewsAPI key:", type="password")
+# OpenAI API 키 입력
+api_key = st.sidebar.text_input("🔑 OpenAI API 키 입력", type="password")
+use_gpt = st.sidebar.toggle("🧠 GPT 요약 활성화", value=True)
 
-country_names = {
-    "global": "🌍 Global (No country filter)",
-    "us": "🇺🇸 United States",
-    "gb": "🇬🇧 United Kingdom",
-    "jp": "🇯🇵 Japan",
-    "in": "🇮🇳 India",
+# 국가 선택 (한국 제외)
+countries = {
+    "us": "🇺🇸 미국",
+    "jp": "🇯🇵 일본",
+    "cn": "🇨🇳 중국",
+    "gb": "🇬🇧 영국",
+    "fr": "🇫🇷 프랑스",
+    "de": "🇩🇪 독일",
 }
-country = st.sidebar.selectbox("🌎 Choose a country:", list(country_names.keys()), format_func=lambda x: country_names[x])
+country = st.sidebar.selectbox("🌍 국가 선택", options=countries.keys(), format_func=lambda x: countries[x])
 
-# ---- OpenAI API Settings ----
-st.sidebar.header("🧠 OpenAI Settings")
-st.sidebar.markdown("""
-### 👉 How to get an OpenAI API Key
-1. Visit [**OpenAI API Keys**](https://platform.openai.com/api-keys)
-2. Log in or sign up
-3. Click **Create new secret key**
-4. Copy and paste it below 👇
-""")
+# 뉴스 API 키
+NEWS_API_KEY = "YOUR_NEWSAPI_KEY_HERE"  # 여기에 실제 News API 키 입력
+NEWS_ENDPOINT = "https://newsapi.org/v2/top-headlines"
 
-openai_key = st.sidebar.text_input("Enter your OpenAI API key:", type="password")
 
-# ✅ 최신 방식: 클라이언트 생성
-client = None
-if openai_key:
-    client = OpenAI(api_key=openai_key)
-
-# ---- Main Controls ----
-topic = st.text_input("Enter a topic (optional):", "AI")
-use_gpt_summary = st.toggle("🧠 GPT 요약 추가", value=False)
-
-# ---- Helper: Clean text ----
-def clean_text(text):
-    if not text:
-        return ""
-    text = re.sub(r"<[^>]+>", "", text)
-    text = re.sub(r"window\.open\(.*?\)", "", text)
-    text = re.sub(r"\{.*?window\.open.*?\}", "", text)
-    text = re.sub(r"onclick=.*?(;|\"|')", "", text)
-    text = re.sub(r"javascript:.*?(;|\"|')", "", text)
-    text = re.sub(r"return\s+false;?", "", text)
-    text = re.sub(r"[,;:]*\s*\d+\s*[\);]*", "", text)
-    text = re.sub(r"[\{\}\(\)\[\]\<\>\"']", "", text)
-    text = re.sub(r"\[\+\d+\s*chars\]", "", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
-
-# ---- GPT Summarization ----
-import traceback
-
-def summarize_with_gpt(text):
+# =============================
+# 🧠 GPT 요약 함수
+# =============================
+def summarize_with_gpt(text, client, max_retries=3):
+    """GPT 요약 안전 버전: 재시도, 쿼터/인코딩 오류 처리"""
     if not client:
         return "⚠️ GPT API 키가 설정되지 않았습니다."
-    if not text.strip():
+    if not text or not text.strip():
         return "요약할 내용이 없습니다."
-    
-    try:
-        # ✅ 이모지, 특수문자 제거 (API 호출 전)
-        clean_text = re.sub(r'[^\x00-\x7F]+', ' ', text)
 
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "너는 뉴스 기사를 간결하게 요약하는 어시스턴트야."},
-                {"role": "user", "content": f"다음 기사를 한국어로 간결히 요약해줘:\n\n{clean_text}"}
-            ],
-            temperature=0.4,
-            max_tokens=120
-        )
-        summary = response.choices[0].message.content.strip()
-        return summary
+    safe_text = re.sub(r"[^\x00-\x7F]+", " ", text).strip()
+    backoff = 1
 
-    except Exception as e:
-        error_msg = traceback.format_exc()
-        return f"요약 중 오류 발생: {error_msg}"
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "너는 뉴스를 간결하게 요약하는 어시스턴트야."},
+                    {"role": "user", "content": f"다음 기사를 한국어로 2~3문장으로 요약해줘:\n\n{safe_text}"}
+                ],
+                temperature=0.4,
+                max_tokens=120
+            )
+            return response.choices[0].message.content.strip()
 
-# ---- Fetch and Display News ----
-if st.button("🔍 Search News"):
-    if not news_api_key:
-        st.warning("🔑 NewsAPI 키를 입력해주세요.")
-    else:
-        with st.spinner("뉴스를 불러오는 중..."):
-            base_url = "https://newsapi.org/v2/"
-            if country == "global":
-                url = f"{base_url}everything?q={topic}&language=en&apiKey={news_api_key}"
-            else:
-                url = f"{base_url}top-headlines?country={country}&q={topic}&apiKey={news_api_key}"
+        except Exception as e:
+            err_str = str(e).lower()
 
-            response = requests.get(url)
-            data = response.json()
+            # ✅ 쿼터 부족 (결제 문제)
+            if "insufficient_quota" in err_str or "quota" in err_str:
+                return "⚠️ 요약 불가: OpenAI API 사용 한도가 초과되었습니다. Billing(결제)을 확인해주세요."
 
-            if data.get("status") != "ok":
-                st.error("⚠️ 뉴스를 불러오지 못했습니다. API 키 또는 요청 형식을 확인해주세요.")
-            else:
-                articles = data.get("articles", [])
-                if not articles:
-                    st.info("표시할 뉴스가 없습니다.")
+            # ✅ 과도한 요청 (429)
+            if "rate" in err_str or "429" in err_str:
+                if attempt < max_retries:
+                    time.sleep(backoff)
+                    backoff *= 2
+                    continue
                 else:
-                    for a in articles:
-                        st.markdown(f"### [{a.get('title')}]({a.get('url')})")
-                        st.caption(f"🗞️ {a.get('source', {}).get('name', 'Unknown')} | 📅 {a.get('publishedAt', '')[:10]}")
-                        
-                        desc = clean_text(a.get("description") or a.get("content") or "")
-                        st.write(desc)
+                    return "⚠️ 요청이 너무 많습니다. 잠시 후 다시 시도해주세요."
 
-                        if use_gpt_summary:
-                            summary_text = summarize_with_gpt(desc)
-                            st.markdown(f"🧠 **GPT 요약:** {summary_text}")
+            # ✅ 그 외 오류
+            print("GPT 요약 에러:", traceback.format_exc())
+            return "⚠️ 요약 중 오류가 발생했습니다."
 
-                        st.divider()
+    return "⚠️ 요약 실패."
+
+
+# =============================
+# 📰 뉴스 데이터 가져오기
+# =============================
+@st.cache_data(show_spinner=False)
+def get_news(country_code):
+    params = {
+        "country": country_code,
+        "apiKey": NEWS_API_KEY,
+        "pageSize": 5,  # 기사 수 조정
+    }
+    res = requests.get(NEWS_ENDPOINT, params=params)
+    data = res.json()
+    return data.get("articles", [])
+
+
+# =============================
+# 🚀 실행 부분
+# =============================
+if api_key:
+    client = OpenAI(api_key=api_key)
+else:
+    client = None
+
+articles = get_news(country)
+
+if not articles:
+    st.warning("뉴스를 불러올 수 없습니다. API 키 또는 국가 설정을 확인하세요.")
+else:
+    for idx, article in enumerate(articles, 1):
+        title = article.get("title", "제목 없음")
+        desc = article.get("description", "내용 없음")
+        url = article.get("url", "")
+        img = article.get("urlToImage", None)
+
+        with st.container():
+            st.subheader(f"{idx}. {title}")
+            if img:
+                st.image(img, use_container_width=True)
+            st.markdown(desc)
+            st.markdown(f"[🔗 기사 바로가기]({url})")
+
+            # ✅ GPT 요약 표시 (토글이 켜져 있을 때만)
+            if use_gpt and client:
+                summary_text = summarize_with_gpt(desc, client)
+                st.markdown(f"🧠 **GPT 요약:** {summary_text}")
+            st.divider()
