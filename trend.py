@@ -23,22 +23,17 @@ st.sidebar.markdown("""
 user_api_key = st.sidebar.text_input("Enter your NewsAPI key:", type="password")
 
 # ----------------------------------------------------------
-# 🌍 Country selection
+# 🌍 Country selection (updated)
 # ----------------------------------------------------------
 country_options = {
+    "global": "🌍 Global",
     "us": "🇺🇸 United States",
     "gb": "🇬🇧 United Kingdom",
-    "kr": "🇰🇷 South Korea",
     "jp": "🇯🇵 Japan",
-    "fr": "🇫🇷 France",
-    "de": "🇩🇪 Germany",
-    "in": "🇮🇳 India",
-    "au": "🇦🇺 Australia",
-    "ca": "🇨🇦 Canada",
-    "br": "🇧🇷 Brazil"
+    "in": "🇮🇳 India"
 }
 
-country = st.sidebar.selectbox("🌎 Choose a country:", options=list(country_options.keys()),
+country = st.sidebar.selectbox("🌎 Choose a region:", options=list(country_options.keys()),
                                format_func=lambda x: country_options[x])
 
 topic = st.text_input("Enter a topic or leave blank to see top headlines:", "")
@@ -52,16 +47,27 @@ def get_news(country, topic, api_key):
         st.warning("Please enter your NewsAPI key in the sidebar.")
         return pd.DataFrame()
 
-    # ✅ 'everything' 제거 — 국가 필터가 반드시 적용되도록
-    base_url = "https://newsapi.org/v2/top-headlines"
-    params = {
-        "country": country,
-        "apiKey": api_key
-    }
+    # ✅ Global mode → everything 엔드포인트 사용
+    if country == "global":
+        base_url = "https://newsapi.org/v2/everything"
+        params = {
+            "q": topic if topic.strip() else "trending",
+            "language": "en",
+            "sortBy": "publishedAt",
+            "pageSize": 15,
+            "apiKey": api_key
+        }
 
-    # ✅ 키워드가 입력되면 함께 필터링
-    if topic.strip():
-        params["q"] = topic
+    # ✅ 특정 국가 선택 → top-headlines 사용
+    else:
+        base_url = "https://newsapi.org/v2/top-headlines"
+        params = {
+            "country": country,
+            "pageSize": 15,
+            "apiKey": api_key
+        }
+        if topic.strip():
+            params["q"] = topic
 
     response = requests.get(base_url, params=params)
     data = response.json()
@@ -71,7 +77,7 @@ def get_news(country, topic, api_key):
         return pd.DataFrame()
 
     if "articles" in data and data["articles"]:
-        articles = data["articles"][:15]
+        articles = data["articles"]
         return pd.DataFrame([
             {
                 "Title": a["title"],
@@ -83,7 +89,6 @@ def get_news(country, topic, api_key):
         ])
     else:
         return pd.DataFrame()
-
 
 # ----------------------------------------------------------
 # 📈 Display Results
