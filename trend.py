@@ -66,6 +66,8 @@ def clean_text(text):
     return text
 
 # ---- GPT Summarization ----
+import traceback
+
 def summarize_with_gpt(text):
     if not client:
         return "⚠️ GPT API 키가 설정되지 않았습니다."
@@ -81,9 +83,13 @@ def summarize_with_gpt(text):
             temperature=0.4,
             max_tokens=120
         )
-        return response.choices[0].message.content.strip()
+        summary = response.choices[0].message.content.strip()
+        # ✅ 안전하게 UTF-8 인코딩 처리
+        return summary.encode("utf-8", errors="ignore").decode("utf-8")
     except Exception as e:
-        return f"요약 중 오류 발생: {str(e)}"
+        # 오류 메시지도 안전하게 출력
+        error_msg = traceback.format_exc()
+        return f"요약 중 오류 발생:\n{error_msg}".encode("utf-8", errors="ignore").decode("utf-8")
 
 # ---- Fetch and Display News ----
 if st.button("🔍 Search News"):
