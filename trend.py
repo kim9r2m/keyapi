@@ -9,15 +9,37 @@ from openai import OpenAI
 # ⚙️ 기본 설정
 # =============================
 st.set_page_config(page_title="AI 뉴스 요약", layout="wide")
-
 st.title("📰 글로벌 트렌드 뉴스 요약 (GPT 요약 기능 포함)")
 
-# OpenAI API 키 입력
-api_key = st.sidebar.text_input("🔑 OpenAI API 키 입력", type="password")
+# =============================
+# 🧭 사이드바
+# =============================
+st.sidebar.markdown("### 🧩 API 키 설정 방법")
+
+with st.sidebar.expander("📡 NewsAPI 설정 방법"):
+    st.markdown("""
+    1. [NewsAPI.org](https://newsapi.org) 접속  
+    2. 무료 회원가입 후 API 키 발급  
+    3. 아래 입력란에 붙여넣기  
+    """)
+
+with st.sidebar.expander("🤖 OpenAI API 설정 방법"):
+    st.markdown("""
+    1. [OpenAI Platform](https://platform.openai.com/account/api-keys) 접속  
+    2. API Key 생성 후 복사  
+    3. 아래 입력란에 붙여넣기  
+    """)
+
+# 입력란
+news_api_key = st.sidebar.text_input("📡 NewsAPI 키 입력", type="password")
+openai_api_key = st.sidebar.text_input("🤖 OpenAI API 키 입력", type="password")
+
+# 요약 기능 On/Off
 use_gpt = st.sidebar.toggle("🧠 GPT 요약 활성화", value=True)
 
-# 국가 선택 (한국 제외)
+# 국가 선택 (한국 제외 + global 추가)
 countries = {
+    "global": "🌐 Global (전 세계)",
     "us": "🇺🇸 미국",
     "jp": "🇯🇵 일본",
     "cn": "🇨🇳 중국",
@@ -27,16 +49,16 @@ countries = {
 }
 country = st.sidebar.selectbox("🌍 국가 선택", options=countries.keys(), format_func=lambda x: countries[x])
 
-# 뉴스 API 키
-NEWS_API_KEY = "YOUR_NEWSAPI_KEY_HERE"  # 여기에 실제 News API 키 입력
-NEWS_ENDPOINT = "https://newsapi.org/v2/top-headlines"
-
+# =============================
+# 🔍 뉴스 검색어 입력창
+# =============================
+st.markdown("### 🔎 뉴스 키워드 검색")
+keyword = st.text_input("검색할 키워드를 입력하세요 (예: AI, 경제, 기술, 전쟁 등)", placeholder="예: AI chatbot, economy, technology")
 
 # =============================
 # 🧠 GPT 요약 함수
 # =============================
 def summarize_with_gpt(text, client, max_retries=3):
-    """GPT 요약 안전 버전: 재시도, 쿼터/인코딩 오류 처리"""
     if not client:
         return "⚠️ GPT API 키가 설정되지 않았습니다."
     if not text or not text.strip():
@@ -60,12 +82,8 @@ def summarize_with_gpt(text, client, max_retries=3):
 
         except Exception as e:
             err_str = str(e).lower()
-
-            # ✅ 쿼터 부족 (결제 문제)
             if "insufficient_quota" in err_str or "quota" in err_str:
-                return "⚠️ 요약 불가: OpenAI API 사용 한도가 초과되었습니다. Billing(결제)을 확인해주세요."
-
-            # ✅ 과도한 요청 (429)
+                return "⚠️ 요약 불가: OpenAI API 사용 한도가 초과되었습니다."
             if "rate" in err_str or "429" in err_str:
                 if attempt < max_retries:
                     time.sleep(backoff)
@@ -73,8 +91,6 @@ def summarize_with_gpt(text, client, max_retries=3):
                     continue
                 else:
                     return "⚠️ 요청이 너무 많습니다. 잠시 후 다시 시도해주세요."
-
-            # ✅ 그 외 오류
             print("GPT 요약 에러:", traceback.format_exc())
             return "⚠️ 요약 중 오류가 발생했습니다."
 
@@ -85,13 +101,22 @@ def summarize_with_gpt(text, client, max_retries=3):
 # 📰 뉴스 데이터 가져오기
 # =============================
 @st.cache_data(show_spinner=False)
-def get_news(country_code):
+def get_news(api_key, country_code, keyword=None):
+    endpoint = "https://newsapi.org/v2/top-headlines"
     params = {
-        "country": country_code,
-        "apiKey": NEWS_API_KEY,
-        "pageSize": 5,  # 기사 수 조정
+        "apiKey": api_key,
+        "pageSize": 5,
     }
-    res = requests.get(NEWS_ENDPOINT, params=params)
+
+    # 글로벌 옵션일 때 country 제외
+    if country_code != "global":
+        params["country"] = country_code
+
+    # 검색어 있으면 추가
+    if keyword:
+        params["q"] = keyword
+
+    res = requests.get(endpoint, params=params)
     data = res.json()
     return data.get("articles", [])
 
@@ -99,31 +124,36 @@ def get_news(country_code):
 # =============================
 # 🚀 실행 부분
 # =============================
-if api_key:
-    client = OpenAI(api_key=api_key)
+if openai_api_key:
+    client = OpenAI(api_key=openai_api_key)
 else:
     client = None
 
-articles = get_news(country)
-
-if not articles:
-    st.warning("뉴스를 불러올 수 없습니다. API 키 또는 국가 설정을 확인하세요.")
+if not news_api_key:
+    st.warning("📡 NewsAPI 키를 왼쪽 입력창에 입력해주세요.")
 else:
-    for idx, article in enumerate(articles, 1):
-        title = article.get("title", "제목 없음")
-        desc = article.get("description", "내용 없음")
-        url = article.get("url", "")
-        img = article.get("urlToImage", None)
+    articles = get_news(news_api_key, country, keyword)
 
-        with st.container():
-            st.subheader(f"{idx}. {title}")
-            if img:
-                st.image(img, use_container_width=True)
-            st.markdown(desc)
-            st.markdown(f"[🔗 기사 바로가기]({url})")
+    if not articles:
+        if keyword:
+            st.warning(f"'{keyword}' 관련 뉴스를 찾을 수 없습니다.")
+        else:
+            st.warning("뉴스를 불러올 수 없습니다. API 키 또는 국가 설정을 확인하세요.")
+    else:
+        for idx, article in enumerate(articles, 1):
+            title = article.get("title", "제목 없음")
+            desc = article.get("description", "내용 없음")
+            url = article.get("url", "")
+            img = article.get("urlToImage", None)
 
-            # ✅ GPT 요약 표시 (토글이 켜져 있을 때만)
-            if use_gpt and client:
-                summary_text = summarize_with_gpt(desc, client)
-                st.markdown(f"🧠 **GPT 요약:** {summary_text}")
-            st.divider()
+            with st.container():
+                st.subheader(f"{idx}. {title}")
+                if img:
+                    st.image(img, use_container_width=True)
+                st.markdown(desc)
+                st.markdown(f"[🔗 기사 바로가기]({url})")
+
+                if use_gpt and client:
+                    summary_text = summarize_with_gpt(desc, client)
+                    st.markdown(f"🧠 **GPT 요약:** {summary_text}")
+                st.divider()
