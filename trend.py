@@ -97,9 +97,21 @@ if st.button("Search 🔍"):
     news_df = get_news(country, topic, user_api_key)
     if not news_df.empty:
         st.subheader(f"🗞️ Top News from {country_options[country]}")
-        st.dataframe(news_df)
+
+        # ✅ URL을 클릭 가능한 링크로 변환
+        news_df["Title"] = news_df.apply(
+            lambda x: f'<a href="{x["URL"]}" target="_blank">{x["Title"]}</a>', axis=1
+        )
+
+        # ✅ 불필요한 URL 컬럼 제거
+        news_df_display = news_df[["Title", "Source", "Published"]]
+
+        # ✅ HTML로 출력 (링크 활성화)
+        st.write(news_df_display.to_html(escape=False, index=False), unsafe_allow_html=True)
+
     else:
         st.warning("No news found or invalid API key.")
+
 
 # ----------------------------------------------------------
 # ℹ️ Footer
