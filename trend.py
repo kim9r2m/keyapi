@@ -1,155 +1,90 @@
 import streamlit as st
 import requests
-import pandas as pd
-
-# 🎨 Streamlit setup
-st.set_page_config(page_title="Global Trend News Dashboard", page_icon="📰", layout="wide")
-st.title("📰 Global Trend News Dashboard")
-st.write("Stay updated with the latest headlines from around the world!")
-
-# ----------------------------------------------------------
-# 🧩 Sidebar: API Key + Info
-# ----------------------------------------------------------
-st.sidebar.header("🔑 NewsAPI Settings")
-
-st.sidebar.markdown("""
-**👉 How to get a NewsAPI Key**
-1. Visit [NewsAPI.org](https://newsapi.org/register)
-2. Sign up for a free account
-3. Go to the [Dashboard](https://newsapi.org/account)
-4. Copy your **API key** and paste it below 👇
-""")
-
-user_api_key = st.sidebar.text_input("Enter your NewsAPI key:", type="password")
-
-# ----------------------------------------------------------
-# 🌍 Country selection (updated)
-# ----------------------------------------------------------
-country_options = {
-    "global": "🌍 Global",
-    "us": "🇺🇸 United States",
-    "gb": "🇬🇧 United Kingdom",
-    "jp": "🇯🇵 Japan",
-    "in": "🇮🇳 India"
-}
-
-country = st.sidebar.selectbox("🌎 Choose a region:", options=list(country_options.keys()),
-                               format_func=lambda x: country_options[x])
-
-topic = st.text_input("Enter a topic or leave blank to see top headlines:", "")
-
-# ----------------------------------------------------------
-# 📰 Fetch News Articles
-# ----------------------------------------------------------
 import re
+import openai
 
+# ---- GPT API 키 입력 (Streamlit secrets로 관리하는 걸 권장) ----
+openai.api_key = st.secrets.get("OPENAI_API_KEY", "")
+
+# ---- Helper: 텍스트 정리 함수 ----
 def clean_text(text):
-    """Remove HTML, JS snippets, and unwanted artifacts from article summaries."""
     if not text:
         return ""
-
-    # 1️⃣ Remove all HTML tags
     text = re.sub(r"<[^>]+>", "", text)
-
-    # 2️⃣ Remove any JavaScript event code or functions
     text = re.sub(r"window\.open\(.*?\)", "", text)
     text = re.sub(r"\{.*?window\.open.*?\}", "", text)
     text = re.sub(r"onclick=.*?(;|\"|')", "", text)
     text = re.sub(r"javascript:.*?(;|\"|')", "", text)
     text = re.sub(r"return\s+false;?", "", text)
-
-    # 3️⃣ Remove remaining JS-like syntax artifacts (, 200); etc.)
     text = re.sub(r"[,;:]*\s*\d+\s*[\);]*", "", text)
-
-    # 4️⃣ Remove redundant symbols and braces
     text = re.sub(r"[\{\}\(\)\[\]\<\>\"']", "", text)
-
-    # 5️⃣ Remove '[+123 chars]' style truncation indicators
     text = re.sub(r"\[\+\d+\s*chars\]", "", text)
-
-    # 6️⃣ Normalize whitespace
     text = re.sub(r"\s+", " ", text).strip()
-
     return text
 
+# ---- GPT 요약 함수 ----
+def summarize_with_gpt(text):
+    if not openai.api_key:
+        return "⚠️ GPT API 키가 설정되지 않았습니다."
+    if not text.strip():
+        return "요약할 내용이 없습니다."
+    
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "너는 뉴스 기사를 간결하게 요약하는 어시스턴트야."},
+                {"role": "user", "content": f"다음 기사를 한국어로 간결히 요약해줘:\n\n{text}"}
+            ],
+            temperature=0.4,
+            max_tokens=120
+        )
+        summary = response.choices[0].message.content.strip()
+        return summary
+    except Exception as e:
+        return f"요약 중 오류 발생: {str(e)}"
 
-def get_news(country, topic, api_key):
-    """Fetch latest news articles from NewsAPI."""
+# ---- Streamlit UI ----
+st.title("📰 Global Trend News Dashboard")
+
+api_key = st.text_input("🔑 NewsAPI Key", type="password")
+country = st.selectbox("🌍 Choose a country", ["global", "us", "gb", "jp", "in"])
+topic = st.text_input("Enter a topic (optional):", "AI")
+
+# ✅ GPT 요약 기능 토글 버튼
+use_gpt_summary = st.toggle("🧠 GPT 요약 추가", value=False)
+
+if st.button("Search"):
     if not api_key:
-        st.warning("Please enter your NewsAPI key in the sidebar.")
-        return pd.DataFrame()
-
-    if country == "global":
-        base_url = "https://newsapi.org/v2/everything"
-        params = {
-            "q": topic if topic.strip() else "trending",
-            "language": "en",
-            "sortBy": "publishedAt",
-            "pageSize": 10,
-            "apiKey": api_key
-        }
+        st.warning("API 키를 입력해주세요.")
     else:
-        base_url = "https://newsapi.org/v2/top-headlines"
-        params = {
-            "country": country,
-            "pageSize": 10,
-            "apiKey": api_key
-        }
-        if topic.strip():
-            params["q"] = topic
+        with st.spinner("뉴스를 불러오는 중..."):
+            base_url = "https://newsapi.org/v2/"
+            if country == "global":
+                url = f"{base_url}everything?q={topic}&language=en&apiKey={api_key}"
+            else:
+                url = f"{base_url}top-headlines?country={country}&q={topic}&apiKey={api_key}"
+            
+            response = requests.get(url)
+            data = response.json()
 
-    response = requests.get(base_url, params=params)
-    data = response.json()
+            if data.get("status") != "ok":
+                st.error("⚠️ 뉴스를 불러오지 못했습니다. API 키 또는 요청 형식을 확인해주세요.")
+            else:
+                articles = data.get("articles", [])
+                if not articles:
+                    st.info("표시할 뉴스가 없습니다.")
+                else:
+                    for a in articles:
+                        st.markdown(f"### [{a.get('title')}]({a.get('url')})")
+                        st.caption(f"🗞️ {a.get('source', {}).get('name', 'Unknown')} | 📅 {a.get('publishedAt', '')[:10]}")
+                        
+                        desc = clean_text(a.get("description") or a.get("content") or "")
+                        st.write(desc)
 
-    if response.status_code != 200:
-        st.error(f"Error fetching news: {data.get('message', 'Unknown error')}")
-        return pd.DataFrame()
-
-    if "articles" in data and data["articles"]:
-        articles = data["articles"]
-        return pd.DataFrame([
-            {
-                "Title": a["title"],
-                "Summary": clean_text(a.get("description") or a.get("content") or ""),
-                "Source": a["source"]["name"],
-                "Published": a["publishedAt"][:10] if a.get("publishedAt") else "",
-                "URL": a["url"]
-            }
-            for a in articles if a.get("title")
-        ])
-    else:
-        return pd.DataFrame()
-
-# ----------------------------------------------------------
-# 📈 Display Results (with summaries)
-# ----------------------------------------------------------
-if st.button("Search 🔍"):
-    news_df = get_news(country, topic, user_api_key)
-    if not news_df.empty:
-        st.subheader(f"🗞️ Top News from {country_options[country]}")
-
-        # ✅ HTML 구성
-        html_content = ""
-        for _, row in news_df.iterrows():
-            summary = row["Summary"][:200] + "..." if len(row["Summary"]) > 200 else row["Summary"]
-            html_content += f"""
-            <div style="margin-bottom: 1.2em; padding: 0.8em; border-radius: 10px; background-color: #f9f9f9;">
-                <a href="{row['URL']}" target="_blank" style="font-size: 1.05em; font-weight: 600; color: #1a73e8; text-decoration: none;">
-                    {row['Title']}
-                </a><br>
-                <span style="font-size: 0.9em; color: #555;">{summary}</span><br>
-                <span style="font-size: 0.8em; color: #888;">📅 {row['Published']} | 🏷️ {row['Source']}</span>
-            </div>
-            """
-
-        st.markdown(html_content, unsafe_allow_html=True)
-    else:
-        st.warning("No news found or invalid API key.")
-
-# ----------------------------------------------------------
-# ℹ️ Footer
-# ----------------------------------------------------------
-st.markdown("""
----
-Made with ❤️ using [NewsAPI](https://newsapi.org)
-""")
+                        # ✅ GPT 요약문 추가 (토글 ON일 때만)
+                        if use_gpt_summary:
+                            summary = summarize_with_gpt(desc)
+                            st.info(f"**🧠 GPT 요약:** {summary}")
+                        
+                        st.divider()
