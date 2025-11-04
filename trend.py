@@ -73,23 +73,26 @@ def summarize_with_gpt(text):
         return "⚠️ GPT API 키가 설정되지 않았습니다."
     if not text.strip():
         return "요약할 내용이 없습니다."
+    
     try:
+        # ✅ 이모지, 특수문자 제거 (API 호출 전)
+        clean_text = re.sub(r'[^\x00-\x7F]+', ' ', text)
+
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "너는 뉴스 기사를 간결하게 요약하는 어시스턴트야."},
-                {"role": "user", "content": f"다음 기사를 한국어로 간결히 요약해줘:\n\n{text}"}
+                {"role": "user", "content": f"다음 기사를 한국어로 간결히 요약해줘:\n\n{clean_text}"}
             ],
             temperature=0.4,
             max_tokens=120
         )
         summary = response.choices[0].message.content.strip()
-        # ✅ 안전하게 UTF-8 인코딩 처리
-        return summary.encode("utf-8", errors="ignore").decode("utf-8")
+        return summary
+
     except Exception as e:
-        # 오류 메시지도 안전하게 출력
         error_msg = traceback.format_exc()
-        return f"요약 중 오류 발생:\n{error_msg}".encode("utf-8", errors="ignore").decode("utf-8")
+        return f"요약 중 오류 발생: {error_msg}"
 
 # ---- Fetch and Display News ----
 if st.button("🔍 Search News"):
@@ -121,7 +124,7 @@ if st.button("🔍 Search News"):
                         st.write(desc)
 
                         if use_gpt_summary:
-                            summary = summarize_with_gpt(desc)
-                            st.info(f"**🧠 GPT 요약:** {summary}")
+                            summary_text = summarize_with_gpt(desc)
+                            st.markdown(f"🧠 **GPT 요약:** {summary_text}")
 
                         st.divider()
