@@ -1,7 +1,7 @@
 import streamlit as st
 import requests
 import re
-import openai
+from openai import OpenAI
 
 # ---- App Title ----
 st.set_page_config(page_title="Global Trend News Dashboard", page_icon="📰", layout="wide")
@@ -39,7 +39,11 @@ st.sidebar.markdown("""
 """)
 
 openai_key = st.sidebar.text_input("Enter your OpenAI API key:", type="password")
-openai.api_key = openai_key
+
+# ✅ 최신 방식: 클라이언트 생성
+client = None
+if openai_key:
+    client = OpenAI(api_key=openai_key)
 
 # ---- Main Controls ----
 topic = st.text_input("Enter a topic (optional):", "AI")
@@ -63,12 +67,12 @@ def clean_text(text):
 
 # ---- GPT Summarization ----
 def summarize_with_gpt(text):
-    if not openai.api_key:
+    if not client:
         return "⚠️ GPT API 키가 설정되지 않았습니다."
     if not text.strip():
         return "요약할 내용이 없습니다."
     try:
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "너는 뉴스 기사를 간결하게 요약하는 어시스턴트야."},
