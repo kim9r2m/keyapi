@@ -41,6 +41,25 @@ topic = st.text_input("Enter a topic or leave blank to see top headlines:", "")
 # ----------------------------------------------------------
 # 📰 Fetch News Articles
 # ----------------------------------------------------------
+import re
+
+def clean_text(text):
+    """Remove HTML tags and JS snippets from text."""
+    if not text:
+        return ""
+    # Remove HTML tags
+    text = re.sub(r"<.*?>", "", text)
+    # Remove JavaScript snippets like window.open(...);
+    text = re.sub(r"\{.*?window\.open.*?\}", "", text)
+    text = re.sub(r"window\.open\(.*?\)", "", text)
+    text = re.sub(r"return\s+false;?", "", text)
+    text = re.sub(r"onclick=.*?(;|\s|$)", "", text)
+    text = re.sub(r"javascript:.*?(;|\s|$)", "", text)
+    # Remove leftover braces or extra quotes
+    text = re.sub(r"[{}<>]+", "", text)
+    # Trim spaces
+    return text.strip()
+
 def get_news(country, topic, api_key):
     """Fetch latest news articles from NewsAPI."""
     if not api_key:
@@ -78,7 +97,7 @@ def get_news(country, topic, api_key):
         return pd.DataFrame([
             {
                 "Title": a["title"],
-                "Summary": a.get("description") or a.get("content") or "",
+                "Summary": clean_text(a.get("description") or a.get("content") or ""),,
                 "Source": a["source"]["name"],
                 "Published": a["publishedAt"][:10] if a.get("publishedAt") else "",
                 "URL": a["url"]
