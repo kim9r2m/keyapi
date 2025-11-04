@@ -44,21 +44,34 @@ topic = st.text_input("Enter a topic or leave blank to see top headlines:", "")
 import re
 
 def clean_text(text):
-    """Remove HTML tags and JS snippets from text."""
+    """Remove HTML, JS snippets, and unwanted artifacts from article summaries."""
     if not text:
         return ""
-    # Remove HTML tags
-    text = re.sub(r"<.*?>", "", text)
-    # Remove JavaScript snippets like window.open(...);
-    text = re.sub(r"\{.*?window\.open.*?\}", "", text)
+
+    # 1️⃣ Remove all HTML tags
+    text = re.sub(r"<[^>]+>", "", text)
+
+    # 2️⃣ Remove any JavaScript event code or functions
     text = re.sub(r"window\.open\(.*?\)", "", text)
+    text = re.sub(r"\{.*?window\.open.*?\}", "", text)
+    text = re.sub(r"onclick=.*?(;|\"|')", "", text)
+    text = re.sub(r"javascript:.*?(;|\"|')", "", text)
     text = re.sub(r"return\s+false;?", "", text)
-    text = re.sub(r"onclick=.*?(;|\s|$)", "", text)
-    text = re.sub(r"javascript:.*?(;|\s|$)", "", text)
-    # Remove leftover braces or extra quotes
-    text = re.sub(r"[{}<>]+", "", text)
-    # Trim spaces
-    return text.strip()
+
+    # 3️⃣ Remove remaining JS-like syntax artifacts (, 200); etc.)
+    text = re.sub(r"[,;:]*\s*\d+\s*[\);]*", "", text)
+
+    # 4️⃣ Remove redundant symbols and braces
+    text = re.sub(r"[\{\}\(\)\[\]\<\>\"']", "", text)
+
+    # 5️⃣ Remove '[+123 chars]' style truncation indicators
+    text = re.sub(r"\[\+\d+\s*chars\]", "", text)
+
+    # 6️⃣ Normalize whitespace
+    text = re.sub(r"\s+", " ", text).strip()
+
+    return text
+
 
 def get_news(country, topic, api_key):
     """Fetch latest news articles from NewsAPI."""
