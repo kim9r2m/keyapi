@@ -16,7 +16,7 @@ st.write("Stay updated with the latest headlines from around the world!")
 # ----------------------------------------------------------
 st.sidebar.header("🔑 API Settings")
 
-# 🧾 NewsAPI 안내
+# 🗞 NewsAPI 안내
 st.sidebar.markdown("""
 **🗞 How to get a NewsAPI Key**
 1. Visit [NewsAPI.org](https://newsapi.org/register)
@@ -134,7 +134,6 @@ def summarize_with_gpt(text, client):
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
-        # OpenAI quota or 429 error → handled globally
         raise e
 
 # ----------------------------------------------------------
@@ -142,13 +141,23 @@ def summarize_with_gpt(text, client):
 # ----------------------------------------------------------
 if st.button("Search 🔍"):
     news_df = get_news(country, topic, news_api_key)
+
     if not news_df.empty:
         st.subheader(f"🗞️ Top News from {country_options[country]}")
 
         openai_error_shown = False
         client = None
+
+        # GPT API client 생성
         if use_gpt_summary and openai_api_key:
-            client = OpenAI(api_key=openai_api_key)
+            try:
+                client = OpenAI(api_key=openai_api_key)
+            except Exception:
+                st.error("⚠️ Invalid OpenAI API key.")
+                use_gpt_summary = False
+
+        # ✅ GPT 에러 메시지 위치 이동 (제목 바로 아래)
+        gpt_error_placeholder = st.empty()
 
         for _, row in news_df.iterrows():
             title_html = f"""
@@ -159,14 +168,13 @@ if st.button("Search 🔍"):
             """
             st.markdown(title_html, unsafe_allow_html=True)
 
-            # GPT 요약 시도
             if use_gpt_summary and client:
                 try:
                     summary_text = summarize_with_gpt(row["Summary"], client)
                     st.markdown(f"🧠 **GPT 요약:** {summary_text}")
-                except Exception as e:
+                except Exception:
                     if not openai_error_shown:
-                        st.error("⚠️ OpenAI quota exceeded or API error. Showing original summaries instead.")
+                        gpt_error_placeholder.error("⚠️ OpenAI quota exceeded or API error. Showing original summaries instead.")
                         openai_error_shown = True
                     st.markdown(f"📝 **Summary:** {row['Summary']}")
             else:
@@ -174,6 +182,7 @@ if st.button("Search 🔍"):
 
             st.markdown(f"📅 {row['Published']} | 🏷️ {row['Source']}")
             st.markdown("---")
+
     else:
         st.warning("No news found or invalid API key.")
 
