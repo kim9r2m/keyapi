@@ -97,7 +97,7 @@ def get_news(country, topic, api_key):
         return pd.DataFrame([
             {
                 "Title": a["title"],
-                "Summary": clean_text(a.get("description") or a.get("content") or ""),,
+                "Summary": clean_text(a.get("description") or a.get("content") or ""),
                 "Source": a["source"]["name"],
                 "Published": a["publishedAt"][:10] if a.get("publishedAt") else "",
                 "URL": a["url"]
