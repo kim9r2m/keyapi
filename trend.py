@@ -41,11 +41,12 @@ use_gpt = st.sidebar.toggle("🧠 GPT 요약 활성화", value=True)
 countries = {
     "global": "🌐 Global (전 세계)",
     "us": "🇺🇸 미국",
-    "jp": "🇯🇵 일본",
-    "cn": "🇨🇳 중국",
     "gb": "🇬🇧 영국",
+    "jp": "🇯🇵 일본",
     "fr": "🇫🇷 프랑스",
     "de": "🇩🇪 독일",
+    "in": "🇮🇳 인도",
+    "cn": "🇨🇳 중국",
 }
 country = st.sidebar.selectbox("🌍 국가 선택", options=countries.keys(), format_func=lambda x: countries[x])
 
@@ -101,11 +102,12 @@ def summarize_with_gpt(text, client, max_retries=3):
 # 📰 뉴스 데이터 가져오기
 # =============================
 @st.cache_data(show_spinner=False)
-def get_news(api_key, country_code, keyword=None):
+def get_news(api_key, country_code, keyword=None, page=1, page_size=5):
     endpoint = "https://newsapi.org/v2/top-headlines"
     params = {
         "apiKey": api_key,
-        "pageSize": 5,
+        "pageSize": page_size,
+        "page": page,
     }
 
     # 글로벌 옵션일 때 country 제외
@@ -132,7 +134,12 @@ else:
 if not news_api_key:
     st.warning("📡 NewsAPI 키를 왼쪽 입력창에 입력해주세요.")
 else:
-    articles = get_news(news_api_key, country, keyword)
+    # 현재 페이지 상태 관리 (Streamlit session_state 사용)
+    if "page" not in st.session_state:
+        st.session_state.page = 1
+
+    # 데이터 불러오기
+    articles = get_news(news_api_key, country, keyword, page=st.session_state.page)
 
     if not articles:
         if keyword:
@@ -147,7 +154,7 @@ else:
             img = article.get("urlToImage", None)
 
             with st.container():
-                st.subheader(f"{idx}. {title}")
+                st.subheader(f"{title}")
                 if img:
                     st.image(img, use_container_width=True)
                 st.markdown(desc)
@@ -157,3 +164,8 @@ else:
                     summary_text = summarize_with_gpt(desc, client)
                     st.markdown(f"🧠 **GPT 요약:** {summary_text}")
                 st.divider()
+
+        # ✅ "더 많은 기사 보기" 버튼 추가
+        if st.button("🔽 더 많은 기사 보기"):
+            st.session_state.page += 1
+            st.rerun()
