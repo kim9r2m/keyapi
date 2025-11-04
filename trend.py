@@ -3,10 +3,49 @@ import requests
 import re
 import openai
 
-# ---- GPT API 키 입력 (Streamlit secrets로 관리하는 걸 권장) ----
-openai.api_key = st.secrets.get("OPENAI_API_KEY", "")
+# ---- App Title ----
+st.set_page_config(page_title="Global Trend News Dashboard", page_icon="📰", layout="wide")
+st.title("📰 Global Trend News Dashboard")
 
-# ---- Helper: 텍스트 정리 함수 ----
+# ---- Sidebar: Settings ----
+st.sidebar.header("🔑 NewsAPI Settings")
+st.sidebar.markdown("""
+### 👉 How to get a NewsAPI Key
+1. Visit [**NewsAPI.org**](https://newsapi.org)
+2. Sign up for a free account
+3. Go to the **Dashboard**
+4. Copy your **API key** and paste it below 👇
+""")
+
+news_api_key = st.sidebar.text_input("Enter your NewsAPI key:", type="password")
+
+country_names = {
+    "global": "🌍 Global (No country filter)",
+    "us": "🇺🇸 United States",
+    "gb": "🇬🇧 United Kingdom",
+    "jp": "🇯🇵 Japan",
+    "in": "🇮🇳 India",
+}
+country = st.sidebar.selectbox("🌎 Choose a country:", list(country_names.keys()), format_func=lambda x: country_names[x])
+
+# ---- OpenAI API Settings ----
+st.sidebar.header("🧠 OpenAI Settings")
+st.sidebar.markdown("""
+### 👉 How to get an OpenAI API Key
+1. Visit [**OpenAI API Keys**](https://platform.openai.com/api-keys)
+2. Log in or sign up
+3. Click **Create new secret key**
+4. Copy and paste it below 👇
+""")
+
+openai_key = st.sidebar.text_input("Enter your OpenAI API key:", type="password")
+openai.api_key = openai_key
+
+# ---- Main Controls ----
+topic = st.text_input("Enter a topic (optional):", "AI")
+use_gpt_summary = st.toggle("🧠 GPT 요약 추가", value=False)
+
+# ---- Helper: Clean text ----
 def clean_text(text):
     if not text:
         return ""
@@ -22,13 +61,12 @@ def clean_text(text):
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
-# ---- GPT 요약 함수 ----
+# ---- GPT Summarization ----
 def summarize_with_gpt(text):
     if not openai.api_key:
         return "⚠️ GPT API 키가 설정되지 않았습니다."
     if not text.strip():
         return "요약할 내용이 없습니다."
-    
     try:
         response = openai.ChatCompletion.create(
             model="gpt-4o-mini",
@@ -39,32 +77,22 @@ def summarize_with_gpt(text):
             temperature=0.4,
             max_tokens=120
         )
-        summary = response.choices[0].message.content.strip()
-        return summary
+        return response.choices[0].message.content.strip()
     except Exception as e:
         return f"요약 중 오류 발생: {str(e)}"
 
-# ---- Streamlit UI ----
-st.title("📰 Global Trend News Dashboard")
-
-api_key = st.text_input("🔑 NewsAPI Key", type="password")
-country = st.selectbox("🌍 Choose a country", ["global", "us", "gb", "jp", "in"])
-topic = st.text_input("Enter a topic (optional):", "AI")
-
-# ✅ GPT 요약 기능 토글 버튼
-use_gpt_summary = st.toggle("🧠 GPT 요약 추가", value=False)
-
-if st.button("Search"):
-    if not api_key:
-        st.warning("API 키를 입력해주세요.")
+# ---- Fetch and Display News ----
+if st.button("🔍 Search News"):
+    if not news_api_key:
+        st.warning("🔑 NewsAPI 키를 입력해주세요.")
     else:
         with st.spinner("뉴스를 불러오는 중..."):
             base_url = "https://newsapi.org/v2/"
             if country == "global":
-                url = f"{base_url}everything?q={topic}&language=en&apiKey={api_key}"
+                url = f"{base_url}everything?q={topic}&language=en&apiKey={news_api_key}"
             else:
-                url = f"{base_url}top-headlines?country={country}&q={topic}&apiKey={api_key}"
-            
+                url = f"{base_url}top-headlines?country={country}&q={topic}&apiKey={news_api_key}"
+
             response = requests.get(url)
             data = response.json()
 
@@ -82,9 +110,8 @@ if st.button("Search"):
                         desc = clean_text(a.get("description") or a.get("content") or "")
                         st.write(desc)
 
-                        # ✅ GPT 요약문 추가 (토글 ON일 때만)
                         if use_gpt_summary:
                             summary = summarize_with_gpt(desc)
                             st.info(f"**🧠 GPT 요약:** {summary}")
-                        
+
                         st.divider()
