@@ -1,0 +1,215 @@
+import streamlit as st
+import requests
+import pandas as pd
+import re
+import time
+import traceback
+from openai import OpenAI
+
+# 🎨 Streamlit setup
+st.set_page_config(page_title="Global Trend News Dashboard", page_icon="📰", layout="wide")
+st.title("📰 Global Trend News Dashboard")
+st.write("Stay updated with the latest headlines from around the world!")
+
+# ----------------------------------------------------------
+# 🧩 Sidebar: API Key + Info
+# ----------------------------------------------------------
+st.sidebar.header("🔑 API Settings")
+
+# 🔹 NewsAPI 안내
+st.sidebar.markdown("""
+### 📡 How to get a NewsAPI Key
+1. Visit [NewsAPI.org](https://newsapi.org/register)
+2. Sign up for a free account  
+3. Go to your [Dashboard](https://newsapi.org/account)
+4. Copy your **API key** and paste it below 👇
+""")
+user_api_key = st.sidebar.text_input("Enter your NewsAPI key:", type="password")
+
+# 🔹 OpenAI API 안내
+st.sidebar.markdown("""
+### 🤖 How to get an OpenAI API Key
+1. Visit [OpenAI API Keys](https://platform.openai.com/account/api-keys)
+2. Log in and click **Create new secret key**
+3. Copy and paste your key below 👇
+""")
+openai_api_key = st.sidebar.text_input("Enter your OpenAI API key:", type="password")
+
+# GPT 요약 토글 버튼
+use_gpt_summary = st.sidebar.toggle("🧠 Enable GPT Summary", value=False)
+
+# ----------------------------------------------------------
+# 🌍 Country selection (updated)
+# ----------------------------------------------------------
+country_options = {
+    "global": "🌍 Global",
+    "us": "🇺🇸 United States",
+    "gb": "🇬🇧 United Kingdom",
+    "jp": "🇯🇵 Japan",
+    "in": "🇮🇳 India"
+}
+
+country = st.sidebar.selectbox(
+    "🌎 Choose a region:",
+    options=list(country_options.keys()),
+    format_func=lambda x: country_options[x]
+)
+
+topic = st.text_input("Enter a topic or leave blank to see top headlines:", "")
+
+# ----------------------------------------------------------
+# 🧹 Clean text
+# ----------------------------------------------------------
+def clean_text(text):
+    """Remove HTML, JS snippets, and unwanted artifacts from article summaries."""
+    if not text:
+        return ""
+    text = re.sub(r"<[^>]+>", "", text)
+    text = re.sub(r"window\.open\(.*?\)", "", text)
+    text = re.sub(r"\{.*?window\.open.*?\}", "", text)
+    text = re.sub(r"onclick=.*?(;|\"|')", "", text)
+    text = re.sub(r"javascript:.*?(;|\"|')", "", text)
+    text = re.sub(r"return\s+false;?", "", text)
+    text = re.sub(r"[,;:]*\s*\d+\s*[\);]*", "", text)
+    text = re.sub(r"[\{\}\(\)\[\]\<\>\"']", "", text)
+    text = re.sub(r"\[\+\d+\s*chars\]", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+# ----------------------------------------------------------
+# 🧠 GPT 요약 함수
+# ----------------------------------------------------------
+def summarize_with_gpt(text, client, max_retries=3):
+    """Summarize article text safely with retry & error handling."""
+    if not client:
+        return "⚠️ GPT API key not set."
+    if not text.strip():
+        return "No text to summarize."
+
+    safe_text = re.sub(r"[^\x00-\x7F]+", " ", text).strip()
+    backoff = 1
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant summarizing news articles concisely."},
+                    {"role": "user", "content": f"Summarize this news article in Korean, 2-3 sentences:\n\n{safe_text}"}
+                ],
+                temperature=0.4,
+                max_tokens=120
+            )
+            return response.choices[0].message.content.strip()
+
+        except Exception as e:
+            err = str(e).lower()
+            if "insufficient_quota" in err or "quota" in err:
+                return "⚠️ OpenAI quota exceeded. Please check your billing."
+            if "429" in err or "rate" in err:
+                if attempt < max_retries:
+                    time.sleep(backoff)
+                    backoff *= 2
+                    continue
+                else:
+                    return "⚠️ Too many requests. Try again later."
+            print("GPT summary error:", traceback.format_exc())
+            return "⚠️ Error occurred during summary."
+    return "⚠️ Failed to summarize."
+
+# ----------------------------------------------------------
+# 📰 Fetch News Articles
+# ----------------------------------------------------------
+def get_news(country, topic, api_key):
+    """Fetch latest news articles from NewsAPI."""
+    if not api_key:
+        st.warning("Please enter your NewsAPI key in the sidebar.")
+        return pd.DataFrame()
+
+    if country == "global":
+        base_url = "https://newsapi.org/v2/everything"
+        params = {
+            "q": topic if topic.strip() else "trending",
+            "language": "en",
+            "sortBy": "publishedAt",
+            "pageSize": 10,
+            "apiKey": api_key
+        }
+    else:
+        base_url = "https://newsapi.org/v2/top-headlines"
+        params = {
+            "country": country,
+            "pageSize": 10,
+            "apiKey": api_key
+        }
+        if topic.strip():
+            params["q"] = topic
+
+    response = requests.get(base_url, params=params)
+    data = response.json()
+
+    if response.status_code != 200:
+        st.error(f"Error fetching news: {data.get('message', 'Unknown error')}")
+        return pd.DataFrame()
+
+    if "articles" in data and data["articles"]:
+        articles = data["articles"]
+        return pd.DataFrame([
+            {
+                "Title": a["title"],
+                "Summary": clean_text(a.get("description") or a.get("content") or ""),
+                "Source": a["source"]["name"],
+                "Published": a["publishedAt"][:10] if a.get("publishedAt") else "",
+                "URL": a["url"]
+            }
+            for a in articles if a.get("title")
+        ])
+    else:
+        return pd.DataFrame()
+
+# ----------------------------------------------------------
+# 📈 Display Results (with optional GPT summary)
+# ----------------------------------------------------------
+if st.button("Search 🔍"):
+    news_df = get_news(country, topic, user_api_key)
+    if not news_df.empty:
+        st.subheader(f"🗞️ Top News from {country_options[country]}")
+
+        if openai_api_key:
+            client = OpenAI(api_key=openai_api_key)
+        else:
+            client = None
+
+        # ✅ HTML 구성
+        html_content = ""
+        for _, row in news_df.iterrows():
+            summary_text = row["Summary"][:200] + "..." if len(row["Summary"]) > 200 else row["Summary"]
+
+            html_content += f"""
+            <div style="margin-bottom: 1.2em; padding: 0.8em; border-radius: 10px; background-color: #f9f9f9;">
+                <a href="{row['URL']}" target="_blank" style="font-size: 1.05em; font-weight: 600; color: #1a73e8; text-decoration: none;">
+                    {row['Title']}
+                </a><br>
+                <span style="font-size: 0.9em; color: #555;">{summary_text}</span><br>
+                <span style="font-size: 0.8em; color: #888;">📅 {row['Published']} | 🏷️ {row['Source']}</span>
+            </div>
+            """
+
+            # ✅ GPT 요약 표시 (토글이 켜져 있을 때만)
+            if use_gpt_summary and client:
+                with st.spinner("Generating GPT summary..."):
+                    gpt_summary = summarize_with_gpt(row["Summary"], client)
+                    st.info(f"**🧠 GPT 요약:** {gpt_summary}")
+
+        st.markdown(html_content, unsafe_allow_html=True)
+
+    else:
+        st.warning("No news found or invalid API key.")
+
+# ----------------------------------------------------------
+# ℹ️ Footer
+# ----------------------------------------------------------
+st.markdown("""
+---
+Made with ❤️ using [NewsAPI](https://newsapi.org) and [OpenAI](https://platform.openai.com)
+""")
